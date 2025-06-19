@@ -1,9 +1,55 @@
 import OpenAI from 'openai';
+import axios from 'axios';
+import * as cheerio from 'cheerio';
+import iconv from 'iconv-lite';
 
 // OpenAI 설정
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
+
+// 사이트 요약 함수
+async function getSiteSummary(url) {
+  try {
+    console.log('사이트 요약 시작:', url);
+    const { data: buffer } = await axios.get(url, {
+      timeout: 5000,
+      responseType: 'arraybuffer',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+      }
+    });
+
+    let encoding = 'utf-8';
+    const htmlSnippet = buffer.toString('ascii');
+    const charsetMatch = htmlSnippet.match(/<meta[^>]*charset=['"]?([^'"\s/>]+)/i);
+    if (charsetMatch && charsetMatch[1]) {
+      encoding = charsetMatch[1].toLowerCase();
+    }
+
+    let html;
+    try {
+      html = iconv.decode(buffer, encoding);
+    } catch (e) {
+      html = buffer.toString('utf-8');
+    }
+
+    const $ = cheerio.load(html);
+    const title = $('title').text().trim();
+    const description = $('meta[name="description"]').attr('content')?.trim() || '';
+    const keywords = [];
+    $('h1, h2, h3, strong, li').each((i, el) => {
+      const text = $(el).text().trim();
+      if (text.length > 8 && text.length < 50) keywords.push(text);
+    });
+    const mainKeywords = keywords.slice(0, 5).join(', ');
+    console.log('사이트 요약 완료:', { title, description: description.substring(0, 100) });
+    return { title, description, mainKeywords };
+  } catch (e) {
+    console.error('사이트 요약 중 오류:', e.message);
+    return null;
+  }
+}
 
 export default async function handler(req, res) {
   console.log('Generate Questions API 호출:', req.method, req.url);
@@ -46,6 +92,12 @@ export default async function handler(req, res) {
 
     console.log('파라미터 확인:', { domain, industry, mainService });
 
+    // 웹사이트 크롤링
+    const url = domain.startsWith('http') ? domain : `https://${domain}`;
+    const siteInfo = await getSiteSummary(url);
+    const mainKeywords = siteInfo?.mainKeywords || '없음';
+    const description = siteInfo?.description || '없음';
+
     const prompt = `당신은 '${industry}' 업계에서 '${mainService}' 관련 서비스를 찾고 있는 실제 소비자입니다.  
                     아래 정보를 참고하여, 실제 사용자가 자연스럽게 물어볼 만한 현실적인 질문 5개를 작성해 주세요.
                     꼭 5개 업체나 서비스가 추천될 수 있도록 구성해주세요.
@@ -53,12 +105,15 @@ export default async function handler(req, res) {
 [참고 정보]
 - 업종: ${industry}
 - 주요 서비스: ${mainService}
+- 웹사이트 키워드: ${mainKeywords}
+- 웹사이트 설명: ${description}
 
 [질문 작성 가이드라인]
 1. 실제 고객이 자주 궁금해할 만한 실용적인 질문을 작성해 주세요
 2. 자연스러운 구어체로 작성해 주세요 (예: "~을 추천해주세요", "~한 곳 없나요?", "어디가 좋을까요?")
 3. 반드시 5개의 업체나 서비스가 추천될 수 있도록 질문을 구성해 주세요
 4. 질문은 실제 소비자가 자주 사용하는 단어와 표현을 사용해 주세요
+5. 웹사이트 정보를 참고하여 더 구체적이고 관련성 높은 질문을 작성해 주세요
 
 [질문 예시 - 성형외과의 경우]
 - "강남에서 코성형 잘하는 병원 5곳만 추천해주세요"
@@ -105,7 +160,7 @@ export default async function handler(req, res) {
     console.log('생성된 질문:', questions);
     res.json({ 
       questions, 
-      siteInfo: { title: 'AI 생성', description: 'OpenAI API로 생성된 질문입니다.' }
+      siteInfo
     });
   } catch (error) {
     console.error('질문 생성 오류:', error);
