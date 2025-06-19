@@ -15,10 +15,29 @@ async function getAssistant() {
   const assistant = await openai.beta.assistants.create({
     name: "한국 기업 추천 어시스턴트",
     model: "gpt-4o",
-    instructions: `실제 존재하는 한국 회사를 추천해 주세요.
-                   허구 브랜드, 존재하지 않는 도메인은 절대 포함하지 마세요.
-                   모르면 빈 문자열("")로 남기세요.
-                   JSON 형식으로만 출력하세요.`
+    instructions: `당신은 한국 기업 추천 전문가입니다. 
+다음 규칙을 엄격히 따라주세요:
+
+1. 실제 존재하는 한국 회사만 추천하세요
+2. 허구 브랜드나 존재하지 않는 도메인은 절대 포함하지 마세요
+3. 반드시 다음 JSON 형식으로만 응답하세요:
+
+{
+  "companies": [
+    {
+      "rank": 1,
+      "name": "회사명",
+      "domain": "도메인",
+      "strength": "주요 강점",
+      "features": "특징",
+      "reason": "추천 이유",
+      "serviceType": "서비스 유형"
+    }
+  ]
+}
+
+4. JSON 형식 외의 다른 텍스트는 포함하지 마세요
+5. 모르는 정보는 빈 문자열("")로 남기세요`
   });
 
   ASSISTANT_ID = assistant.id;
@@ -85,7 +104,12 @@ export default async function handler(req, res) {
     // 메시지 추가
     await openai.beta.threads.messages.create(thread.id, {
       role: "user",
-      content: `업종: ${industry}\n서비스: ${mainService}\n질문: ${question}\n\n위 질문에 대해 한국 회사 5곳을 추천해주세요.`
+      content: `업종: ${industry}
+서비스: ${mainService}
+질문: ${question}
+
+위 질문에 대해 실제 존재하는 한국 회사 5곳을 추천해주세요.
+반드시 JSON 형식으로만 응답해주세요.`
     });
 
     // Run 생성 및 완료 대기
@@ -112,7 +136,18 @@ export default async function handler(req, res) {
     // 응답 파싱
     try {
       let content = lastMessage.content[0].text.value.trim();
+      console.log('원본 응답:', content);
+      
+      // 코드 블록 제거
       content = content.replace(/```[a-zA-Z]*\n?/g, '').replace(/```/g, '').trim();
+      console.log('코드 블록 제거 후:', content);
+      
+      // JSON 부분만 추출
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        content = jsonMatch[0];
+      }
+      
       console.log('파싱할 내용:', content);
       
       const parsed = JSON.parse(content);
@@ -127,6 +162,40 @@ export default async function handler(req, res) {
       
     } catch (parseError) {
       console.error('JSON 파싱 실패:', parseError);
+      console.error('파싱 시도한 내용:', content);
+      
+      // fallback: 텍스트에서 회사명 추출 시도
+      try {
+        const fallbackCompanies = [];
+        const lines = lastMessage.content[0].text.value.split('\n');
+        let rank = 1;
+        
+        for (const line of lines) {
+          if (rank > 5) break;
+          
+          // 회사명 패턴 찾기 (숫자. 회사명 형태)
+          const match = line.match(/^\d+\.\s*(.+)/);
+          if (match && match[1].trim()) {
+            fallbackCompanies.push({
+              rank: rank++,
+              name: match[1].trim(),
+              domain: "",
+              strength: "정보 없음",
+              features: "정보 없음", 
+              reason: "AI 응답에서 추출",
+              serviceType: industry
+            });
+          }
+        }
+        
+        if (fallbackCompanies.length > 0) {
+          console.log('Fallback 추천 기업:', fallbackCompanies);
+          return res.json({ companies: fallbackCompanies });
+        }
+      } catch (fallbackError) {
+        console.error('Fallback 처리 실패:', fallbackError);
+      }
+      
       return res.json({
         companies: [
           {
