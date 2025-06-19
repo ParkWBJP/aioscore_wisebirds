@@ -1,9 +1,9 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 // Google Generative AI 설정
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   console.log('Gemini Search API 호출:', req.method, req.url);
   
   // CORS 헤더 설정
