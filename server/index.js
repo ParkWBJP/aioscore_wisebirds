@@ -121,18 +121,34 @@ async function getSiteSummary(url) {
   }
 }
 
-// 질문 생성 API
-app.post('/api/generate-questions', async (req, res) => {
-  console.log('[API 호출]', req.method, req.originalUrl, '바디:', req.body);
-  
-  try {
-    const { domain, industry, mainService } = req.body;
-    const url = domain.startsWith('http') ? domain : `https://${domain}`;
-    const siteInfo = await getSiteSummary(url);
-    const mainKeywords = siteInfo?.mainKeywords || '없음';
-    const description = siteInfo?.description || '없음';
+// Vercel 서버리스 함수로 변경
+module.exports = async (req, res) => {
+  // CORS 헤더 설정
+  res.setHeader('Access-Control-Allow-Credentials', true);
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version'
+  );
 
-    const prompt = `당신은 '${industry}' 업계에서 '${mainService}' 관련 서비스를 찾고 있는 실제 소비자입니다.  
+  // OPTIONS 요청 처리
+  if (req.method === 'OPTIONS') {
+    res.status(200).end();
+    return;
+  }
+
+  // API 라우팅
+  if (req.method === 'POST') {
+    if (req.url === '/api/generate-questions') {
+      try {
+        const { domain, industry, mainService } = req.body;
+        const url = domain.startsWith('http') ? domain : `https://${domain}`;
+        const siteInfo = await getSiteSummary(url);
+        const mainKeywords = siteInfo?.mainKeywords || '없음';
+        const description = siteInfo?.description || '없음';
+
+        const prompt = `당신은 '${industry}' 업계에서 '${mainService}' 관련 서비스를 찾고 있는 실제 소비자입니다.  
                     아래 정보를 참고하여, 실제 사용자가 자연스럽게 물어볼 만한 현실적인 질문 5개를 작성해 주세요.
                     꼭 5개 업체나 서비스가 추천될 수 있도록 구성해주세요.
 
@@ -156,40 +172,48 @@ app.post('/api/generate-questions', async (req, res) => {
 위 예시처럼, '${mainService}'를 찾는 실제 고객의 관점에서 자연스럽고 구체적인 질문 5개를 JSON 배열로만 출력해주세요.
 반드시 JSON 배열로만 출력해주세요.`;
 
-    const response = await openai.chat.completions.create({
-      model: 'gpt-3.5-turbo',
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.7,
-      max_tokens: 500
-    });
+        const response = await openai.chat.completions.create({
+          model: 'gpt-3.5-turbo',
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.7,
+          max_tokens: 500
+        });
 
-    let questions = [];
-    try {
-      let content = response.choices?.[0]?.message?.content.trim();
-      content = content.replace(/```[a-zA-Z]*\n?/g, '').replace(/```/g, '').trim();
-      const parsed = JSON.parse(content);
-      if (Array.isArray(parsed)) {
-        if (typeof parsed[0] === 'object' && parsed[0]?.question) {
-          questions = parsed.map(q => q.question);
-        } else {
-          questions = parsed;
+        let questions = [];
+        try {
+          let content = response.choices?.[0]?.message?.content.trim();
+          content = content.replace(/```[a-zA-Z]*\n?/g, '').replace(/```/g, '').trim();
+          const parsed = JSON.parse(content);
+          if (Array.isArray(parsed)) {
+            if (typeof parsed[0] === 'object' && parsed[0]?.question) {
+              questions = parsed.map(q => q.question);
+            } else {
+              questions = parsed;
+            }
+          }
+        } catch {
+          const fallback = response.choices?.[0]?.message?.content || '';
+          questions = fallback
+            .split('\n')
+            .filter(line => line.trim())
+            .map(line => line.replace(/^\d+\.\s*/, '').replace(/^"|"$/g, '').trim())
+            .slice(0, 5);
         }
-      }
-    } catch {
-      const fallback = response.choices?.[0]?.message?.content || '';
-      questions = fallback
-        .split('\n')
-        .filter(line => line.trim())
-        .map(line => line.replace(/^\d+\.\s*/, '').replace(/^"|"$/g, '').trim())
-        .slice(0, 5);
-    }
 
-    res.json({ questions, siteInfo });
-  } catch (error) {
-    console.error('질문 생성 오류:', error);
-    res.status(500).json({ error: '질문 생성에 실패했습니다.' });
+        res.json({ questions, siteInfo });
+      } catch (error) {
+        console.error('질문 생성 오류:', error);
+        res.status(500).json({ error: '질문 생성에 실패했습니다.' });
+      }
+    } else if (req.url === '/api/gpt/search') {
+      // 기존 검색 API 로직...
+    } else {
+      res.status(404).json({ error: '잘못된 API 경로입니다.' });
+    }
+  } else {
+    res.status(405).json({ error: '허용되지 않은 메소드입니다.' });
   }
-});
+};
 
 // 검색 결과 추천 API
 app.post('/api/gpt/search', async (req, res) => {
