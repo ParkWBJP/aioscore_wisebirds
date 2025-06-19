@@ -167,64 +167,14 @@ const Analysis = () => {
   
   const platforms = ['GPT', 'Claude', 'Gemini'];
 
-  // 검색 완료 여부 체크
-  const isAllSearchCompleted = () => {
-    return questions.every((_, qIdx) =>
-      platforms.every(platform => searchStatus[qIdx]?.[platform] === 'completed')
-    );
-  };
-
   useEffect(() => {
-    if (isAllSearchCompleted()) {
-      const timer = setTimeout(() => {
-        setShowReport(true);
-      }, 3000);
-      return () => clearTimeout(timer);
+    // 필수 파라미터 검증
+    if (!questions || !domain || !industry || !mainService) {
+      setError('필수 파라미터가 누락되었습니다. 처음부터 다시 시작해주세요.');
+      return;
     }
-  }, [searchStatus]);
 
-  const startGPTSearch = async () => {
-    // 각 질문에 대해 순차적으로 GPT API 호출
-    for (let qIdx = 0; qIdx < questions.length; qIdx++) {
-      try {
-        // 상태 업데이트: 검색 중
-        setSearchStatus(prev => ({
-          ...prev,
-          [qIdx]: { ...prev[qIdx], GPT: 'searching' }
-        }));
-
-        // GPT API 호출
-        const result = await searchGPT(
-          questions[qIdx],
-          domain,
-          industry,
-          mainService
-        );
-
-        // 검색 결과 저장
-        setSearchResults(prev => ({
-          ...prev,
-          [qIdx]: { ...prev[qIdx], GPT: result }
-        }));
-
-        // 상태 업데이트: 검색 완료
-        setSearchStatus(prev => ({
-          ...prev,
-          [qIdx]: { ...prev[qIdx], GPT: 'completed' }
-        }));
-
-      } catch (error) {
-        console.error(`질문 ${qIdx + 1} GPT 검색 실패:`, error);
-        setSearchStatus(prev => ({
-          ...prev,
-          [qIdx]: { ...prev[qIdx], GPT: 'error' }
-        }));
-        setError(`질문 ${qIdx + 1}의 GPT 검색 중 오류가 발생했습니다: ${error.message}`);
-      }
-    }
-  };
-
-  useEffect(() => {
+    // 검색 시작
     startGPTSearch();
     // Claude(실제 API 호출) + Gemini(실제 API 호출)
     questions.forEach((_, qIdx) => {
@@ -289,6 +239,63 @@ const Analysis = () => {
       })();
     });
   }, []);
+
+  // 검색 완료 여부 체크
+  const isAllSearchCompleted = () => {
+    return questions.every((_, qIdx) =>
+      platforms.every(platform => searchStatus[qIdx]?.[platform] === 'completed')
+    );
+  };
+
+  useEffect(() => {
+    if (isAllSearchCompleted()) {
+      const timer = setTimeout(() => {
+        setShowReport(true);
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [searchStatus]);
+
+  const startGPTSearch = async () => {
+    // 각 질문에 대해 순차적으로 GPT API 호출
+    for (let qIdx = 0; qIdx < questions.length; qIdx++) {
+      try {
+        // 상태 업데이트: 검색 중
+        setSearchStatus(prev => ({
+          ...prev,
+          [qIdx]: { ...prev[qIdx], GPT: 'searching' }
+        }));
+
+        // GPT API 호출
+        const result = await searchGPT(
+          questions[qIdx],
+          domain,
+          industry,
+          mainService
+        );
+
+        // 검색 결과 저장
+        setSearchResults(prev => ({
+          ...prev,
+          [qIdx]: { ...prev[qIdx], GPT: result }
+        }));
+
+        // 상태 업데이트: 검색 완료
+        setSearchStatus(prev => ({
+          ...prev,
+          [qIdx]: { ...prev[qIdx], GPT: 'completed' }
+        }));
+
+      } catch (error) {
+        console.error(`질문 ${qIdx + 1} GPT 검색 실패:`, error);
+        setSearchStatus(prev => ({
+          ...prev,
+          [qIdx]: { ...prev[qIdx], GPT: 'error' }
+        }));
+        setError(`질문 ${qIdx + 1}의 GPT 검색 중 오류가 발생했습니다: ${error.message}`);
+      }
+    }
+  };
 
   const getStatusIcon = (status) => {
     switch (status) {
