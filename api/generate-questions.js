@@ -11,9 +11,13 @@ const openai = new OpenAI({
 // 사이트 요약 함수
 async function getSiteSummary(url) {
   try {
+    console.log('사이트 요약 시작:', url);
     const { data: buffer } = await axios.get(url, {
       timeout: 5000,
-      responseType: 'arraybuffer'
+      responseType: 'arraybuffer',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+      }
     });
 
     let encoding = 'utf-8';
@@ -39,6 +43,7 @@ async function getSiteSummary(url) {
       if (text.length > 8 && text.length < 50) keywords.push(text);
     });
     const mainKeywords = keywords.slice(0, 5).join(', ');
+    console.log('사이트 요약 완료:', { title, description: description.substring(0, 100) });
     return { title, description, mainKeywords };
   } catch (e) {
     console.error('사이트 요약 중 오류:', e.message);
@@ -47,6 +52,9 @@ async function getSiteSummary(url) {
 }
 
 module.exports = async (req, res) => {
+  console.log('API 호출:', req.method, req.url);
+  console.log('요청 바디:', req.body);
+  
   // CORS 헤더 설정
   res.setHeader('Access-Control-Allow-Credentials', true);
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -64,15 +72,25 @@ module.exports = async (req, res) => {
 
   // POST 요청만 허용
   if (req.method !== 'POST') {
+    console.log('잘못된 메소드:', req.method);
     return res.status(405).json({ error: '허용되지 않은 메소드입니다.' });
   }
 
   try {
+    // API 키 확인
+    if (!process.env.OPENAI_API_KEY) {
+      console.error('OPENAI_API_KEY가 설정되지 않음');
+      return res.status(500).json({ error: '서버 설정 오류입니다.' });
+    }
+
     const { domain, industry, mainService } = req.body;
     
     if (!domain || !industry || !mainService) {
+      console.log('필수 파라미터 누락:', { domain, industry, mainService });
       return res.status(400).json({ error: '필수 파라미터가 누락되었습니다.' });
     }
+
+    console.log('파라미터 확인:', { domain, industry, mainService });
 
     const url = domain.startsWith('http') ? domain : `https://${domain}`;
     const siteInfo = await getSiteSummary(url);
@@ -103,12 +121,15 @@ module.exports = async (req, res) => {
 위 예시처럼, '${mainService}'를 찾는 실제 고객의 관점에서 자연스럽고 구체적인 질문 5개를 JSON 배열로만 출력해주세요.
 반드시 JSON 배열로만 출력해주세요.`;
 
+    console.log('OpenAI API 호출 시작');
     const response = await openai.chat.completions.create({
       model: 'gpt-3.5-turbo',
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.7,
       max_tokens: 500
     });
+
+    console.log('OpenAI API 응답 받음');
 
     let questions = [];
     try {
@@ -122,7 +143,8 @@ module.exports = async (req, res) => {
           questions = parsed;
         }
       }
-    } catch {
+    } catch (parseError) {
+      console.log('JSON 파싱 실패, fallback 사용');
       const fallback = response.choices?.[0]?.message?.content || '';
       questions = fallback
         .split('\n')
@@ -131,9 +153,13 @@ module.exports = async (req, res) => {
         .slice(0, 5);
     }
 
+    console.log('생성된 질문:', questions);
     res.json({ questions, siteInfo });
   } catch (error) {
     console.error('질문 생성 오류:', error);
-    res.status(500).json({ error: '질문 생성에 실패했습니다.' });
+    res.status(500).json({ 
+      error: '질문 생성에 실패했습니다.',
+      details: error.message 
+    });
   }
 }; 
