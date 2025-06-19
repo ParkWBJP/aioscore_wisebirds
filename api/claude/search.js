@@ -32,8 +32,30 @@ export default async function handler(req, res) {
   try {
     // API 키 확인
     if (!process.env.ANTHROPIC_API_KEY) {
-      console.error('ANTHROPIC_API_KEY가 설정되지 않음');
-      return res.status(500).json({ error: '서버 설정 오류입니다.' });
+      console.error('ANTHROPIC_API_KEY가 설정되지 않음 - 기본 응답 반환');
+      const fallbackResponse = {
+        companies: [
+          {
+            rank: 1,
+            name: "Claude API 키 미설정",
+            domain: "claude.ai",
+            strength: "API 키 설정 필요",
+            features: "Vercel 환경 변수에 ANTHROPIC_API_KEY를 설정해주세요",
+            reason: "Claude API를 사용하려면 API 키가 필요합니다",
+            serviceType: "시스템 알림"
+          },
+          {
+            rank: 2,
+            name: "GPT 모델 사용 권장",
+            domain: "openai.com",
+            strength: "현재 작동 중",
+            features: "GPT 모델이 정상적으로 작동하고 있습니다",
+            reason: "GPT 모델을 사용하여 동일한 질문을 해보세요",
+            serviceType: "대안 제안"
+          }
+        ]
+      };
+      return res.json(fallbackResponse);
     }
 
     // 요청 바디 파싱
@@ -78,17 +100,19 @@ export default async function handler(req, res) {
 }`;
 
     const response = await anthropic.messages.create({
-      model: 'claude-3-sonnet-20240229',
+      model: 'claude-3-haiku-20240307',
       max_tokens: 1000,
       messages: [{ role: 'user', content: prompt }]
     });
 
     console.log('Claude API 응답 받음');
+    console.log('Claude 응답 내용:', response.content[0].text);
 
     let companies = [];
     try {
       let content = response.content[0].text.trim();
       content = content.replace(/```[a-zA-Z]*\n?/g, '').replace(/```/g, '').trim();
+      console.log('파싱할 내용:', content);
       const parsed = JSON.parse(content);
       if (parsed.companies && Array.isArray(parsed.companies)) {
         companies = parsed.companies.filter(company => company.name && company.name.trim() !== '');
@@ -107,6 +131,7 @@ export default async function handler(req, res) {
       }
     } catch (parseError) {
       console.log('JSON 파싱 실패, 기본 응답 생성');
+      console.error('파싱 에러:', parseError);
       companies = [
         {
           rank: 1,
@@ -124,6 +149,25 @@ export default async function handler(req, res) {
     res.json({ companies });
   } catch (error) {
     console.error('Claude 검색 오류:', error);
+    
+    // API 키 오류인 경우 fallback 응답
+    if (error.message.includes('API key') || error.message.includes('authentication')) {
+      const fallbackResponse = {
+        companies: [
+          {
+            rank: 1,
+            name: "Claude API 인증 오류",
+            domain: "claude.ai",
+            strength: "API 키 문제",
+            features: "API 키가 올바르지 않거나 만료되었습니다",
+            reason: "Vercel 환경 변수에서 ANTHROPIC_API_KEY를 확인해주세요",
+            serviceType: "시스템 알림"
+          }
+        ]
+      };
+      return res.json(fallbackResponse);
+    }
+    
     res.status(500).json({ 
       error: 'Claude 검색에 실패했습니다.',
       details: error.message 
