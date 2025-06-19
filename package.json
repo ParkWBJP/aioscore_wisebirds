@@ -1,0 +1,32 @@
+{
+  "name": "aioscore",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev:server": "npx kill-port 3002 && npx nodemon server/index.js",
+    "dev:client": "npx kill-port 5173 && vite",
+    "dev": "npm-run-all --parallel dev:server dev:client",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "axios": "^1.6.7",
+    "chart.js": "^4.4.1",
+    "framer-motion": "^11.0.3",
+    "react": "^18.2.0",
+    "react-chartjs-2": "^5.2.0",
+    "react-countup": "^6.5.0",
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^6.22.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.43",
+    "@types/react-dom": "^18.2.17",
+    "@vitejs/plugin-react": "^4.2.1",
+    "kill-port": "^2.0.1",
+    "nodemon": "^3.1.10",
+    "npm-run-all": "^4.1.5",
+    "vite": "^5.0.8"
+  }
+}
