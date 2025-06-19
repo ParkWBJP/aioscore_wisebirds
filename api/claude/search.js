@@ -5,6 +5,37 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY
 });
 
+// 재시도 함수
+async function retryWithBackoff(fn, maxRetries = 3) {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      console.log(`Claude API 시도 ${attempt}/${maxRetries} 실패:`, error.message);
+      
+      // 529 오류(Overloaded) 또는 재시도 가능한 오류인 경우
+      if (error.status === 529 || 
+          error.message.includes('rate limit') || 
+          error.message.includes('overloaded') ||
+          error.message.includes('timeout')) {
+        
+        if (attempt === maxRetries) {
+          throw error; // 마지막 시도면 오류 던지기
+        }
+        
+        // 지수 백오프: 1초, 2초, 4초
+        const delay = Math.pow(2, attempt - 1) * 1000;
+        console.log(`${delay}ms 후 재시도...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        continue;
+      }
+      
+      // 재시도 불가능한 오류면 바로 던지기
+      throw error;
+    }
+  }
+}
+
 export default async function handler(req, res) {
   console.log('Claude Search API 호출:', req.method, req.url);
   
@@ -99,10 +130,12 @@ export default async function handler(req, res) {
   ]
 }`;
 
-    const response = await anthropic.messages.create({
-      model: 'claude-3-5-haiku-20241022',
-      max_tokens: 1000,
-      messages: [{ role: 'user', content: prompt }]
+    const response = await retryWithBackoff(async () => {
+      return await anthropic.messages.create({
+        model: 'claude-3-5-haiku-20241022',
+        max_tokens: 1000,
+        messages: [{ role: 'user', content: prompt }]
+      });
     });
 
     console.log('Claude API 응답 받음');
@@ -150,6 +183,43 @@ export default async function handler(req, res) {
   } catch (error) {
     console.error('Claude 검색 오류:', error);
     
+    // 529 오류(Overloaded) 처리
+    if (error.status === 529 || error.message.includes('overloaded')) {
+      console.log('Claude 서버 과부하, fallback 응답 반환');
+      const fallbackResponse = {
+        companies: [
+          {
+            rank: 1,
+            name: "Claude 서버 과부하",
+            domain: "claude.ai",
+            strength: "일시적 서버 문제",
+            features: "Claude 서버가 현재 과부하 상태입니다",
+            reason: "잠시 후 다시 시도하거나 다른 AI 모델을 사용해보세요",
+            serviceType: "시스템 알림"
+          },
+          {
+            rank: 2,
+            name: "GPT 모델 사용 권장",
+            domain: "openai.com",
+            strength: "현재 안정적 동작",
+            features: "GPT 모델이 정상적으로 작동하고 있습니다",
+            reason: "동일한 질문을 GPT 모델로 시도해보세요",
+            serviceType: "대안 제안"
+          },
+          {
+            rank: 3,
+            name: "Gemini 모델 사용 권장",
+            domain: "google.com",
+            strength: "안정적 성능",
+            features: "Google의 Gemini 모델도 사용 가능합니다",
+            reason: "Gemini 모델로도 동일한 질문을 시도해보세요",
+            serviceType: "대안 제안"
+          }
+        ]
+      };
+      return res.json(fallbackResponse);
+    }
+    
     // API 키 오류인 경우 fallback 응답
     if (error.message.includes('API key') || error.message.includes('authentication')) {
       const fallbackResponse = {
@@ -168,9 +238,29 @@ export default async function handler(req, res) {
       return res.json(fallbackResponse);
     }
     
-    res.status(500).json({ 
-      error: 'Claude 검색에 실패했습니다.',
-      details: error.message 
-    });
+    // 기타 오류에 대한 fallback 응답
+    const fallbackResponse = {
+      companies: [
+        {
+          rank: 1,
+          name: "Claude API 오류",
+          domain: "claude.ai",
+          strength: "일시적 문제",
+          features: `오류: ${error.message}`,
+          reason: "Claude API에서 오류가 발생했습니다",
+          serviceType: "시스템 알림"
+        },
+        {
+          rank: 2,
+          name: "다른 AI 모델 시도",
+          domain: "aioscore.com",
+          strength: "대안 제공",
+          features: "GPT 또는 Gemini 모델을 사용해보세요",
+          reason: "동일한 질문을 다른 AI 모델로 시도해보세요",
+          serviceType: "대안 제안"
+        }
+      ]
+    };
+    return res.json(fallbackResponse);
   }
 } 
