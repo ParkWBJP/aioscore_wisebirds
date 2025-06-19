@@ -1,9 +1,10 @@
 {
+  "functions": {
+    "api/generate-questions.js": {
+      "maxDuration": 30
+    }
+  },
   "rewrites": [
-    {
-      "source": "/api/(.*)",
-      "destination": "/server/index.js"
-    },
     {
       "source": "/(.*)",
       "destination": "/index.html"
