@@ -101,7 +101,7 @@ export default async function handler(req, res) {
       const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
       const result = await model.generateContent(prompt);
       const response = await result.response;
-      const text = response.text();
+      const text = await response.text();
 
       console.log('Gemini API 응답 받음');
       console.log('Gemini 응답 내용:', text);
