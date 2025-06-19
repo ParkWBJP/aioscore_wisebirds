@@ -66,11 +66,57 @@ const Home = () => {
     }
 
     try {
-      navigate('/loading', { state: { domain, industry: selectedIndustry, mainService } });
-      const { questions, siteInfo } = await generateQuestions(domain, selectedIndustry, mainService);
-      navigate('/result', { state: { domain, industry: selectedIndustry, mainService, questions, siteInfo } });
+      // 데이터 로깅
+      console.log('API 호출 전 데이터:', {
+        domain,
+        industry: selectedIndustry,
+        mainService
+      });
+
+      // Loading 페이지로 이동
+      navigate('/loading', { 
+        state: { 
+          domain: domain.trim(), 
+          industry: selectedIndustry, 
+          mainService: mainService.trim() 
+        },
+        replace: true
+      });
+      
+      // 질문 생성 API 호출
+      const { questions, siteInfo } = await generateQuestions(
+        domain.trim(),
+        selectedIndustry,
+        mainService.trim()
+      );
+
+      // 응답 데이터 로깅
+      console.log('API 응답 데이터:', {
+        questions,
+        siteInfo
+      });
+
+      // 필수 데이터 검증
+      if (!questions || !Array.isArray(questions) || questions.length === 0) {
+        throw new Error('질문 생성에 실패했습니다.');
+      }
+
+      // Result 페이지로 이동
+      navigate('/result', { 
+        state: { 
+          domain: domain.trim(), 
+          industry: selectedIndustry, 
+          mainService: mainService.trim(), 
+          questions, 
+          siteInfo 
+        },
+        replace: true
+      });
     } catch (err) {
+      console.error('질문 생성 오류:', err);
       setError('질문 생성에 실패했습니다.');
+      // 오류 발생 시 홈으로 돌아감
+      navigate('/', { replace: true });
     }
   };
 

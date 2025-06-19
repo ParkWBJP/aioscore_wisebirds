@@ -2,6 +2,15 @@
   "functions": {
     "api/generate-questions.js": {
       "maxDuration": 30
+    },
+    "api/gpt/search.js": {
+      "maxDuration": 30
+    },
+    "api/claude/search.js": {
+      "maxDuration": 30
+    },
+    "api/gemini/search.js": {
+      "maxDuration": 30
     }
   },
   "rewrites": [

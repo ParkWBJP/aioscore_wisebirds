@@ -1,11 +1,26 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Logo from '../components/Logo';
 import '../styles/main.css';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 
-const Result = ({ domain, industry, mainService, siteInfo, questions: initialQuestions }) => {
-  const [questions, setQuestions] = useState(initialQuestions || Array(5).fill(''));
+const Result = () => {
+  const location = useLocation();
   const navigate = useNavigate();
+  const { domain, industry, mainService, questions: initialQuestions, siteInfo } = location.state || {};
+  const [questions, setQuestions] = useState(initialQuestions || Array(5).fill(''));
+  const [error, setError] = useState('');
+
+  // 필수 파라미터 검증
+  useEffect(() => {
+    if (!domain || !industry || !mainService || !initialQuestions) {
+      setError('필수 데이터가 누락되었습니다.');
+      // 3초 후 홈으로 리다이렉트
+      const timer = setTimeout(() => {
+        navigate('/', { replace: true });
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [domain, industry, mainService, initialQuestions, navigate]);
 
   const handleQuestionChange = (idx, value) => {
     const newQuestions = [...questions];
@@ -14,16 +29,57 @@ const Result = ({ domain, industry, mainService, siteInfo, questions: initialQue
   };
 
   const handleStartAnalysis = () => {
+    // 모든 질문이 입력되었는지 확인
+    if (questions.some(q => !q.trim())) {
+      setError('모든 질문을 입력해주세요.');
+      return;
+    }
+
+    // 필수 데이터 검증
+    if (!domain || !industry || !mainService) {
+      console.error('Analysis로 이동 실패 - 필수 데이터 누락:', {
+        domain,
+        industry,
+        mainService
+      });
+      setError('필수 데이터가 누락되었습니다. 처음부터 다시 시작해주세요.');
+      return;
+    }
+
+    // 데이터 전달 전 로깅
+    console.log('Analysis 페이지로 전달할 데이터:', {
+      domain,
+      industry,
+      mainService,
+      questions,
+      siteInfo
+    });
+
     navigate('/analysis', { 
       state: { 
         domain, 
         industry, 
         mainService, 
-        questions, 
+        questions: questions.map(q => q.trim()), // 공백 제거
         siteInfo 
-      } 
+      },
+      replace: true // 뒤로가기 방지
     });
   };
+
+  if (error) {
+    return (
+      <div className="result-page">
+        <header className="result-header">
+          <Logo />
+        </header>
+        <div className="error-container">
+          <p className="error-message">{error}</p>
+          <p>홈으로 이동합니다...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="result-page">
@@ -74,7 +130,11 @@ const Result = ({ domain, industry, mainService, siteInfo, questions: initialQue
             * AI가 임의 생성한 질문이 어색하시다면 직접 질문을 입력하거나 수정하실 수 있습니다.
           </p>
         </div>
-        <button className="result-analyze-btn" onClick={handleStartAnalysis}>
+        <button 
+          className="result-analyze-btn" 
+          onClick={handleStartAnalysis}
+          disabled={questions.some(q => !q.trim())}
+        >
           AI 검색 분석 시작
         </button>
       </div>

@@ -167,10 +167,34 @@ const Analysis = () => {
   
   const platforms = ['GPT', 'Claude', 'Gemini'];
 
+  // 디버깅을 위한 로그 추가
+  console.log('Analysis 페이지 location.state:', location.state);
+  console.log('파싱된 데이터:', { questions, domain, industry, mainService });
+
   useEffect(() => {
     // 필수 파라미터 검증
     if (!questions || !domain || !industry || !mainService) {
+      console.error('누락된 파라미터:', {
+        questions: !!questions,
+        domain: !!domain,
+        industry: !!industry,
+        mainService: !!mainService
+      });
       setError('필수 파라미터가 누락되었습니다. 처음부터 다시 시작해주세요.');
+      return;
+    }
+
+    // 질문 데이터 검증
+    if (!Array.isArray(questions) || questions.length === 0) {
+      console.error('잘못된 질문 데이터:', questions);
+      setError('질문 데이터가 올바르지 않습니다. 처음부터 다시 시작해주세요.');
+      return;
+    }
+
+    // 각 질문이 문자열인지 확인
+    if (questions.some(q => typeof q !== 'string' || !q.trim())) {
+      console.error('잘못된 질문 형식:', questions);
+      setError('질문 데이터가 올바르지 않습니다. 처음부터 다시 시작해주세요.');
       return;
     }
 
@@ -265,6 +289,14 @@ const Analysis = () => {
           ...prev,
           [qIdx]: { ...prev[qIdx], GPT: 'searching' }
         }));
+
+        // 디버깅: API 호출 전 파라미터 확인
+        console.log(`질문 ${qIdx + 1} GPT API 호출 파라미터:`, {
+          question: questions[qIdx],
+          domain,
+          industry,
+          mainService
+        });
 
         // GPT API 호출
         const result = await searchGPT(
