@@ -1,9 +1,9 @@
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 // Google Generative AI 설정
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-module.exports = async function handler(req, res) {
+export default async function handler(req, res) {
   console.log('Gemini Search API 호출:', req.method, req.url);
   
   // CORS 헤더 설정
@@ -31,7 +31,7 @@ module.exports = async function handler(req, res) {
     // API 키 확인
     if (!process.env.GEMINI_API_KEY) {
       console.error('GEMINI_API_KEY가 설정되지 않음 - 기본 응답 반환');
-      const fallbackResponse = {
+      return res.json({
         companies: [
           {
             rank: 1,
@@ -41,30 +41,13 @@ module.exports = async function handler(req, res) {
             features: "Vercel 환경 변수에 GEMINI_API_KEY를 설정해주세요",
             reason: "Gemini API를 사용하려면 API 키가 필요합니다",
             serviceType: "시스템 알림"
-          },
-          {
-            rank: 2,
-            name: "GPT 모델 사용 권장",
-            domain: "openai.com",
-            strength: "현재 작동 중",
-            features: "GPT 모델이 정상적으로 작동하고 있습니다",
-            reason: "GPT 모델을 사용하여 동일한 질문을 해보세요",
-            serviceType: "대안 제안"
           }
         ]
-      };
-      return res.json(fallbackResponse);
+      });
     }
 
     // 요청 바디 파싱
-    let body;
-    try {
-      body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
-    } catch (e) {
-      console.error('요청 바디 파싱 실패:', e);
-      return res.status(400).json({ error: '잘못된 요청 형식입니다.' });
-    }
-
+    const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
     console.log('요청 바디:', body);
 
     const { question, domain, industry, mainService } = body;
@@ -97,40 +80,32 @@ module.exports = async function handler(req, res) {
   ]
 }`;
 
+    const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    const text = await response.text();
+
+    console.log('Gemini API 응답 받음');
+    console.log('Gemini 응답 내용:', text);
+
     try {
-      const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
-      const result = await model.generateContent(prompt);
-      const response = await result.response;
-      const text = await response.text();
+      const content = text.trim().replace(/```[a-zA-Z]*\n?/g, '').replace(/```/g, '').trim();
+      console.log('파싱할 내용:', content);
+      
+      const parsed = JSON.parse(content);
+      const companies = parsed.companies?.filter(company => company.name && company.name.trim() !== '') || [];
+      
+      if (companies.length === 0) {
+        throw new Error('유효한 회사 정보가 없습니다.');
+      }
 
-      console.log('Gemini API 응답 받음');
-      console.log('Gemini 응답 내용:', text);
-
-      let companies = [];
-      try {
-        let content = text.trim();
-        content = content.replace(/```[a-zA-Z]*\n?/g, '').replace(/```/g, '').trim();
-        console.log('파싱할 내용:', content);
-        const parsed = JSON.parse(content);
-        if (parsed.companies && Array.isArray(parsed.companies)) {
-          companies = parsed.companies.filter(company => company.name && company.name.trim() !== '');
-        } else if (Array.isArray(parsed)) {
-          // 기존 형식 호환성 유지
-          companies = parsed.filter(company => company.name && company.name.trim() !== '')
-            .map((company, index) => ({
-              rank: index + 1,
-              name: company.name,
-              domain: company.domain || '',
-              strength: company.description || '정보 없음',
-              features: company.description || '정보 없음',
-              reason: '사용자 질문에 적합한 서비스',
-              serviceType: industry
-            }));
-        }
-      } catch (parseError) {
-        console.log('JSON 파싱 실패, 기본 응답 생성');
-        console.error('파싱 에러:', parseError);
-        companies = [
+      console.log('추천 기업:', companies);
+      return res.json({ companies });
+      
+    } catch (parseError) {
+      console.error('JSON 파싱 실패:', parseError);
+      return res.json({
+        companies: [
           {
             rank: 1,
             name: "응답 파싱 실패",
@@ -140,40 +115,30 @@ module.exports = async function handler(req, res) {
             reason: "AI 응답을 JSON으로 파싱할 수 없습니다",
             serviceType: "오류"
           }
-        ];
-      }
-
-      console.log('추천 기업:', companies);
-      res.json({ companies });
-    } catch (error) {
-      console.error('Gemini 검색 오류:', error);
-      
-      // API 키 오류인 경우 fallback 응답
-      if (error.message.includes('API key') || error.message.includes('authentication')) {
-        const fallbackResponse = {
-          companies: [
-            {
-              rank: 1,
-              name: "Gemini API 인증 오류",
-              domain: "gemini.google.com",
-              strength: "API 키 문제",
-              features: "API 키가 올바르지 않거나 만료되었습니다",
-              reason: "Vercel 환경 변수에서 GEMINI_API_KEY를 확인해주세요",
-              serviceType: "시스템 알림"
-            }
-          ]
-        };
-        return res.json(fallbackResponse);
-      }
-      
-      res.status(500).json({ 
-        error: 'Gemini 검색에 실패했습니다.',
-        details: error.message 
+        ]
       });
     }
   } catch (error) {
     console.error('Gemini 검색 오류:', error);
-    res.status(500).json({ 
+    
+    // API 키 오류인 경우
+    if (error.message?.includes('API key') || error.message?.includes('authentication')) {
+      return res.json({
+        companies: [
+          {
+            rank: 1,
+            name: "Gemini API 인증 오류",
+            domain: "gemini.google.com",
+            strength: "API 키 문제",
+            features: "API 키가 올바르지 않거나 만료되었습니다",
+            reason: "Vercel 환경 변수에서 GEMINI_API_KEY를 확인해주세요",
+            serviceType: "시스템 알림"
+          }
+        ]
+      });
+    }
+    
+    return res.status(500).json({ 
       error: 'Gemini 검색에 실패했습니다.',
       details: error.message 
     });
