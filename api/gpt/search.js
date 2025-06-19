@@ -117,17 +117,39 @@ export default async function handler(req, res) {
       assistant_id: assistantId
     });
 
-    // Run 상태 확인 (최대 10초)
+    console.log('Run 생성됨:', run.id, '상태:', run.status);
+
+    // Run 상태 확인 (최대 30초, 1초마다 폴링)
     let runStatus = run;
     const startTime = Date.now();
-    while (runStatus.status !== 'completed' && Date.now() - startTime < 10000) {
-      await new Promise(resolve => setTimeout(resolve, 500));
+    const maxWaitTime = 30000; // 30초
+    
+    while (runStatus.status !== 'completed' && Date.now() - startTime < maxWaitTime) {
+      await new Promise(resolve => setTimeout(resolve, 1000)); // 1초 대기
       runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id);
+      console.log('Run 상태 확인:', runStatus.status, '경과시간:', Math.round((Date.now() - startTime) / 1000), '초');
+      
+      // 실패 상태 체크
+      if (runStatus.status === 'failed') {
+        throw new Error(`Run 실패: ${runStatus.last_error?.message || '알 수 없는 오류'}`);
+      }
+      
+      // 취소 상태 체크
+      if (runStatus.status === 'cancelled') {
+        throw new Error('Run이 취소되었습니다.');
+      }
+      
+      // 만료 상태 체크
+      if (runStatus.status === 'expired') {
+        throw new Error('Run이 만료되었습니다.');
+      }
     }
 
     if (runStatus.status !== 'completed') {
-      throw new Error('응답 시간 초과');
+      throw new Error(`응답 시간 초과 (${Math.round(maxWaitTime / 1000)}초). 마지막 상태: ${runStatus.status}`);
     }
+
+    console.log('Run 완료됨:', runStatus.status);
 
     // 응답 메시지 가져오기
     const messages = await openai.beta.threads.messages.list(thread.id);
