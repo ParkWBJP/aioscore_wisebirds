@@ -5,7 +5,6 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 export default async function handler(req, res) {
   console.log('Gemini Search API 호출:', req.method, req.url);
-  console.log('요청 바디:', req.body);
   
   // CORS 헤더 설정
   res.setHeader('Access-Control-Allow-Credentials', true);
@@ -35,7 +34,18 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: '서버 설정 오류입니다.' });
     }
 
-    const { question, domain, industry, mainService } = req.body;
+    // 요청 바디 파싱
+    let body;
+    try {
+      body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
+    } catch (e) {
+      console.error('요청 바디 파싱 실패:', e);
+      return res.status(400).json({ error: '잘못된 요청 형식입니다.' });
+    }
+
+    console.log('요청 바디:', body);
+
+    const { question, domain, industry, mainService } = body;
     
     if (!question || !domain || !industry || !mainService) {
       console.log('필수 파라미터 누락:', { question, domain, industry, mainService });
