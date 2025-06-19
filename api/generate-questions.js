@@ -1,7 +1,7 @@
-const OpenAI = require('openai');
-const axios = require('axios');
-const cheerio = require('cheerio');
-const iconv = require('iconv-lite');
+import OpenAI from 'openai';
+import axios from 'axios';
+import cheerio from 'cheerio';
+import iconv from 'iconv-lite';
 
 // OpenAI 설정
 const openai = new OpenAI({
@@ -51,7 +51,7 @@ async function getSiteSummary(url) {
   }
 }
 
-module.exports = async (req, res) => {
+export default async function handler(req, res) {
   console.log('API 호출:', req.method, req.url);
   console.log('요청 바디:', req.body);
   
@@ -162,4 +162,4 @@ module.exports = async (req, res) => {
       details: error.message 
     });
   }
-}; 
+} 
