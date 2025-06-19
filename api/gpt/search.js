@@ -5,6 +5,26 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
+// Assistant ID를 재사용하기 위해 전역 변수로 설정
+let ASSISTANT_ID = null;
+
+// Assistant 생성 또는 가져오기
+async function getAssistant() {
+  if (ASSISTANT_ID) return ASSISTANT_ID;
+
+  const assistant = await openai.beta.assistants.create({
+    name: "한국 기업 추천 어시스턴트",
+    model: "gpt-4o",
+    instructions: `실제 존재하는 한국 회사를 추천해 주세요.
+                   허구 브랜드, 존재하지 않는 도메인은 절대 포함하지 마세요.
+                   모르면 빈 문자열("")로 남기세요.
+                   JSON 형식으로만 출력하세요.`
+  });
+
+  ASSISTANT_ID = assistant.id;
+  return ASSISTANT_ID;
+}
+
 export default async function handler(req, res) {
   console.log('GPT Search API 호출:', req.method, req.url);
   
@@ -56,73 +76,71 @@ export default async function handler(req, res) {
 
     console.log('GPT 검색 시작:', { question, domain, industry, mainService });
 
-    const prompt = `업종: ${industry}
-서비스: ${mainService}
-질문: ${question}
+    // Assistant ID 가져오기
+    const assistantId = await getAssistant();
 
-위 질문에 대해 실제 존재하는 한국 회사 5곳을 추천해주세요.
+    // Thread 생성
+    const thread = await openai.beta.threads.create();
 
-다음 형식으로 JSON 응답해주세요:
-{
-  "companies": [
-    {
-      "rank": 1,
-      "name": "회사명",
-      "domain": "도메인",
-      "strength": "주요 강점",
-      "features": "특징",
-      "reason": "추천 이유",
-      "serviceType": "서비스 유형"
-    }
-  ]
-}`;
-
-    const response = await openai.chat.completions.create({
-      model: 'gpt-3.5-turbo',
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.7,
-      max_tokens: 1000
+    // 메시지 추가
+    await openai.beta.threads.messages.create(thread.id, {
+      role: "user",
+      content: `업종: ${industry}\n서비스: ${mainService}\n질문: ${question}\n\n위 질문에 대해 한국 회사 5곳을 추천해주세요.`
     });
 
-    console.log('GPT API 응답 받음');
+    // Run 생성 및 완료 대기
+    const run = await openai.beta.threads.runs.create(thread.id, {
+      assistant_id: assistantId
+    });
 
-    let companies = [];
-    try {
-      let content = response.choices?.[0]?.message?.content.trim();
-      content = content.replace(/```[a-zA-Z]*\n?/g, '').replace(/```/g, '').trim();
-      const parsed = JSON.parse(content);
-      if (parsed.companies && Array.isArray(parsed.companies)) {
-        companies = parsed.companies.filter(company => company.name && company.name.trim() !== '');
-      } else if (Array.isArray(parsed)) {
-        // 기존 형식 호환성 유지
-        companies = parsed.filter(company => company.name && company.name.trim() !== '')
-          .map((company, index) => ({
-            rank: index + 1,
-            name: company.name,
-            domain: company.domain || '',
-            strength: company.description || '정보 없음',
-            features: company.description || '정보 없음',
-            reason: '사용자 질문에 적합한 서비스',
-            serviceType: industry
-          }));
-      }
-    } catch (parseError) {
-      console.log('JSON 파싱 실패, 기본 응답 생성');
-      companies = [
-        {
-          rank: 1,
-          name: "응답 파싱 실패",
-          domain: "error.com",
-          strength: "JSON 형식 오류",
-          features: "GPT가 JSON 형식으로 응답하지 않음",
-          reason: "AI 응답을 JSON으로 파싱할 수 없습니다",
-          serviceType: "오류"
-        }
-      ];
+    // Run 상태 확인 (최대 10초)
+    let runStatus = run;
+    const startTime = Date.now();
+    while (runStatus.status !== 'completed' && Date.now() - startTime < 10000) {
+      await new Promise(resolve => setTimeout(resolve, 500));
+      runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id);
     }
 
-    console.log('추천 기업:', companies);
-    res.json({ companies });
+    if (runStatus.status !== 'completed') {
+      throw new Error('응답 시간 초과');
+    }
+
+    // 응답 메시지 가져오기
+    const messages = await openai.beta.threads.messages.list(thread.id);
+    const lastMessage = messages.data[0];
+
+    // 응답 파싱
+    try {
+      let content = lastMessage.content[0].text.value.trim();
+      content = content.replace(/```[a-zA-Z]*\n?/g, '').replace(/```/g, '').trim();
+      console.log('파싱할 내용:', content);
+      
+      const parsed = JSON.parse(content);
+      const companies = parsed.companies?.filter(company => company.name && company.name.trim() !== '') || [];
+      
+      if (companies.length === 0) {
+        throw new Error('유효한 회사 정보가 없습니다.');
+      }
+
+      console.log('추천 기업:', companies);
+      return res.json({ companies });
+      
+    } catch (parseError) {
+      console.error('JSON 파싱 실패:', parseError);
+      return res.json({
+        companies: [
+          {
+            rank: 1,
+            name: "응답 파싱 실패",
+            domain: "error.com",
+            strength: "JSON 형식 오류",
+            features: "GPT가 JSON 형식으로 응답하지 않음",
+            reason: "AI 응답을 JSON으로 파싱할 수 없습니다",
+            serviceType: "오류"
+          }
+        ]
+      });
+    }
   } catch (error) {
     console.error('GPT 검색 오류:', error);
     res.status(500).json({ 
