@@ -7,7 +7,7 @@ import axios from 'axios';
 
 const apiClient = axios.create({
   baseURL: window.location.origin,  // Vercel 배포 환경에서는 같은 도메인 사용
-  timeout: 30000,
+  timeout: 60000, // 60초로 증가 (서버 측 30초 + 여유 시간)
   headers: {
     'Content-Type': 'application/json',
   },

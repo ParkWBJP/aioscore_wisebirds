@@ -5,7 +5,27 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY
 });
 
-// 재시도 함수
+// 스트리밍 방식으로 Claude API 호출
+async function streamClaudeResponse(prompt) {
+  const stream = await anthropic.messages.create({
+    model: 'claude-3-5-haiku-20241022',
+    max_tokens: 1000,
+    messages: [{ role: 'user', content: prompt }],
+    stream: true
+  });
+
+  let fullResponse = '';
+  
+  for await (const chunk of stream) {
+    if (chunk.type === 'content_block_delta' && chunk.delta.type === 'text_delta') {
+      fullResponse += chunk.delta.text;
+    }
+  }
+  
+  return fullResponse;
+}
+
+// 재시도 함수 (스트리밍용)
 async function retryWithBackoff(fn, maxRetries = 3) {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
@@ -130,22 +150,26 @@ export default async function handler(req, res) {
   ]
 }`;
 
-    const response = await retryWithBackoff(async () => {
-      return await anthropic.messages.create({
-        model: 'claude-3-5-haiku-20241022',
-        max_tokens: 1000,
-        messages: [{ role: 'user', content: prompt }]
-      });
+    // 스트리밍 방식으로 Claude API 호출 (재시도 로직 포함)
+    const responseText = await retryWithBackoff(async () => {
+      return await streamClaudeResponse(prompt);
     });
 
-    console.log('Claude API 응답 받음');
-    console.log('Claude 응답 내용:', response.content[0].text);
+    console.log('Claude API 스트리밍 응답 완료');
+    console.log('Claude 응답 내용:', responseText);
 
     let companies = [];
     try {
-      let content = response.content[0].text.trim();
+      let content = responseText.trim();
       content = content.replace(/```[a-zA-Z]*\n?/g, '').replace(/```/g, '').trim();
       console.log('파싱할 내용:', content);
+      
+      // JSON 부분만 추출
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        content = jsonMatch[0];
+      }
+      
       const parsed = JSON.parse(content);
       if (parsed.companies && Array.isArray(parsed.companies)) {
         companies = parsed.companies.filter(company => company.name && company.name.trim() !== '');
@@ -165,17 +189,62 @@ export default async function handler(req, res) {
     } catch (parseError) {
       console.log('JSON 파싱 실패, 기본 응답 생성');
       console.error('파싱 에러:', parseError);
-      companies = [
-        {
-          rank: 1,
-          name: "응답 파싱 실패",
-          domain: "error.com",
-          strength: "JSON 형식 오류",
-          features: "Claude가 JSON 형식으로 응답하지 않음",
-          reason: "AI 응답을 JSON으로 파싱할 수 없습니다",
-          serviceType: "오류"
+      console.error('파싱 시도한 내용:', content);
+      
+      // fallback: 텍스트에서 회사명 추출 시도
+      try {
+        const fallbackCompanies = [];
+        const lines = responseText.split('\n');
+        let rank = 1;
+        
+        for (const line of lines) {
+          if (rank > 5) break;
+          
+          // 회사명 패턴 찾기 (숫자. 회사명 형태)
+          const match = line.match(/^\d+\.\s*(.+)/);
+          if (match && match[1].trim()) {
+            fallbackCompanies.push({
+              rank: rank++,
+              name: match[1].trim(),
+              domain: "",
+              strength: "정보 없음",
+              features: "정보 없음", 
+              reason: "AI 응답에서 추출",
+              serviceType: industry
+            });
+          }
         }
-      ];
+        
+        if (fallbackCompanies.length > 0) {
+          console.log('Fallback 추천 기업:', fallbackCompanies);
+          companies = fallbackCompanies;
+        } else {
+          companies = [
+            {
+              rank: 1,
+              name: "응답 파싱 실패",
+              domain: "error.com",
+              strength: "JSON 형식 오류",
+              features: "Claude가 JSON 형식으로 응답하지 않음",
+              reason: "AI 응답을 JSON으로 파싱할 수 없습니다",
+              serviceType: "오류"
+            }
+          ];
+        }
+      } catch (fallbackError) {
+        console.error('Fallback 처리 실패:', fallbackError);
+        companies = [
+          {
+            rank: 1,
+            name: "응답 파싱 실패",
+            domain: "error.com",
+            strength: "JSON 형식 오류",
+            features: "Claude가 JSON 형식으로 응답하지 않음",
+            reason: "AI 응답을 JSON으로 파싱할 수 없습니다",
+            serviceType: "오류"
+          }
+        ];
+      }
     }
 
     console.log('추천 기업:', companies);
